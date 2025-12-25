@@ -1,0 +1,641 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, collection } from 'firebase/firestore';
+import { 
+  Users, 
+  MapPin, 
+  Calendar, 
+  BookOpen, 
+  Search, 
+  Upload, 
+  AlertCircle, 
+  UserPlus, 
+  LayoutDashboard,
+  TrendingUp,
+  TrendingDown,
+  Clock,
+  List,
+  CalendarDays,
+  RefreshCw,
+  ArrowRight,
+  History,
+  Sun,
+  Moon,
+  User,
+  LayoutGrid,
+  CheckCircle2,
+  ChevronRight,
+  Save,
+  Filter,
+  Info
+} from 'lucide-react';
+
+// --- CẤU HÌNH FIREBASE ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'edu-dashboard-manager';
+
+// --- DỮ LIỆU MẪU ---
+const INITIAL_DATA = [
+  { id: 1, updatedAt: "25/12/2023", teacher: "Thầy Bình", classCode: "T12-P1", branch: "Phan Đăng Lưu", grade: "Khối 12", subject: "Toán", current: 28, day: "T2, T4 (17:30)", lastCurrent: 23 },
+  { id: 2, updatedAt: "24/12/2023", teacher: "Cô Lan", classCode: "A10-N2", branch: "Nguyễn Kiệm", grade: "Khối 10", subject: "Anh Văn", current: 12, day: "T3, T5 (19:15)", lastCurrent: 15 },
+  { id: 3, updatedAt: "25/12/2023", teacher: "Thầy Nam", classCode: "L11-V1", branch: "Võ Văn Ngân", grade: "Khối 11", subject: "Vật Lý", current: 22, day: "T7, CN (08:00)", lastCurrent: 18 },
+  { id: 4, updatedAt: "25/12/2023", teacher: "Thầy Hùng", classCode: "V12-N3", branch: "Nguyễn Kiệm", grade: "Khối 12", subject: "Ngữ Văn", current: 28, day: "T2, T6 (18:00)", lastCurrent: 32 },
+  { id: 5, updatedAt: "25/12/2023", teacher: "Cô Mai", classCode: "T8-P2", branch: "Thủ Đức", grade: "Khối 8", subject: "Toán", current: 10, day: "Thứ 4 (17:30)", lastCurrent: 4 },
+];
+
+const App = () => {
+  // --- 1. STATE MANAGEMENT ---
+  const [user, setUser] = useState(null);
+  const [data, setData] = useState(INITIAL_DATA);
+  const [activeTab, setActiveTab] = useState('overview'); 
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [sheetUrl, setSheetUrl] = useState('');
+  const [darkMode, setDarkMode] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [ovBranch, setOvBranch] = useState('All');
+  const [ovSearch, setOvSearch] = useState('');
+  const [schedulerMode, setSchedulerMode] = useState('list');
+  const [schBranch, setSchBranch] = useState('All');
+  const [schGrade, setSchGrade] = useState('All');
+  const [schSubject, setSchSubject] = useState('All');
+  const [schSearch, setSchSearch] = useState('');
+
+  // --- 2. FIREBASE AUTH & PERSISTENCE ---
+  useEffect(() => {
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(auth);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const fetchSettings = async () => {
+      try {
+        const settingsDoc = await getDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'sheetConfig'));
+        if (settingsDoc.exists()) {
+          setSheetUrl(settingsDoc.data().url || '');
+        }
+      } catch (error) {
+        console.error("Lỗi lấy cài đặt:", error);
+      }
+    };
+    fetchSettings();
+  }, [user]);
+
+  const saveSheetLink = async () => {
+    if (!user || !sheetUrl) return;
+    setIsSaving(true);
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'sheetConfig'), {
+        url: sheetUrl,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Lỗi lưu liên kết:", error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // --- 3. HELPER FUNCTIONS ---
+  const getCleanClassName = (item: any) => {
+    if (!item || !item.grade || !item.subject) return "Lớp học";
+    const gradeNum = item.grade.replace(/[^\d]/g, '');
+    return `${item.subject} ${gradeNum}`;
+  };
+
+  const getTeacherIdentity = (name: string) => {
+    const palette = [
+      { bg: 'bg-[#E8F0FE]', text: 'text-[#1A73E8]', border: 'border-[#1A73E8]/30' },
+      { bg: 'bg-[#FCE8E6]', text: 'text-[#D93025]', border: 'border-[#D93025]/30' },
+      { bg: 'bg-[#FEF7E0]', text: 'text-[#F9AB00]', border: 'border-[#F9AB00]/40' },
+      { bg: 'bg-[#E6F4EA]', text: 'text-[#1E8E3E]', border: 'border-[#1E8E3E]/30' },
+      { bg: 'bg-[#F3E8FD]', text: 'text-[#9334E6]', border: 'border-[#9334E6]/30' },
+    ];
+    const hash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return palette[hash % palette.length];
+  };
+
+  const branchStyles = {
+    "Phan Đăng Lưu": "bg-[#4285F4] text-white",
+    "Nguyễn Kiệm": "bg-[#34A853] text-white",
+    "Võ Văn Ngân": "bg-[#FBBC04] text-white",
+    "Thủ Đức": "bg-[#EA4335] text-white",
+    "Default": "bg-slate-600 text-white"
+  };
+
+  // --- 4. COMPUTED DATA ---
+  const branches = useMemo(() => ['All', ...new Set(data.map(d => d.branch))], [data]);
+  const grades = useMemo(() => ['All', ...new Set(data.map(d => d.grade))], [data]);
+  const subjects = useMemo(() => ['All', ...new Set(data.map(d => d.subject))], [data]);
+
+  const filteredOverviewData = useMemo(() => {
+    return data.filter(item => {
+      const matchBranch = ovBranch === 'All' || item.branch === ovBranch;
+      const matchSearch = item.teacher.toLowerCase().includes(ovSearch.toLowerCase()) || 
+                          item.subject.toLowerCase().includes(ovSearch.toLowerCase());
+      return matchBranch && matchSearch;
+    });
+  }, [data, ovBranch, ovSearch]);
+
+  const filteredSchedulerData = useMemo(() => {
+    return data.filter(item => {
+      const matchBranch = schBranch === 'All' || item.branch === schBranch;
+      const matchGrade = schGrade === 'All' || item.grade === schGrade;
+      const matchSubject = schSubject === 'All' || item.subject === schSubject;
+      const matchSearch = item.teacher.toLowerCase().includes(schSearch.toLowerCase()) || 
+                          item.subject.toLowerCase().includes(schSearch.toLowerCase());
+      return matchBranch && matchGrade && matchSubject && matchSearch;
+    });
+  }, [data, schBranch, schGrade, schSubject, schSearch]);
+
+  const stats = useMemo(() => {
+    const itemsWithDiff = filteredOverviewData.map(d => ({ ...d, diff: d.current - d.lastCurrent }));
+    const totalStudents = itemsWithDiff.reduce((sum, d) => sum + d.current, 0);
+    const totalTrend = itemsWithDiff.reduce((sum, d) => sum + d.diff, 0);
+    const risingStars = [...itemsWithDiff].filter(d => d.diff > 0).sort((a, b) => b.diff - a.diff).slice(0, 3);
+    const needsAttention = [...itemsWithDiff].sort((a, b) => a.diff - b.diff).slice(0, 3);
+    return { totalStudents, totalTrend, risingStars, needsAttention };
+  }, [filteredOverviewData]);
+
+  // --- 5. EVENT HANDLERS ---
+  const fetchLiveSheet = async () => {
+    if (!sheetUrl) return;
+    setIsLoading(true);
+    try {
+      const response = await fetch(sheetUrl);
+      const csvText = await response.text();
+      const rows = csvText.split('\n').filter(row => row.trim() !== '');
+      const parsedData = rows.map((row, index) => {
+        const cols = row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.replace(/^"|"$/g, '').trim());
+        if (index === 0 && (cols[1]?.toLowerCase().includes('giáo viên') || cols[0]?.toLowerCase().includes('ngày'))) return null;
+        if (cols.length < 9) return null;
+        return {
+          id: Date.now() + index,
+          updatedAt: cols[0], teacher: cols[1], classCode: cols[2], branch: cols[3], grade: cols[4],
+          subject: cols[5], current: parseInt(cols[6]) || 0, day: cols[7], lastCurrent: parseInt(cols[8]) || parseInt(cols[6]) || 0
+        };
+      }).filter(Boolean);
+      if (parsedData.length > 0) setData(parsedData as any);
+    } catch (error) { 
+      console.error("Lỗi đồng bộ:", error);
+    } finally { 
+      setIsLoading(false); 
+    }
+  };
+
+  const handleManualImport = () => {
+    if (!importText.trim()) return;
+    const rows = importText.trim().split('\n');
+    const newData = rows.map((row, index) => {
+      const cols = row.split('\t'); 
+      if (cols.length < 9) return null;
+      return {
+        id: Date.now() + index, updatedAt: cols[0], teacher: cols[1], classCode: cols[2], branch: cols[3], grade: cols[4],
+        subject: cols[5], current: parseInt(cols[6]) || 0, day: cols[7], lastCurrent: parseInt(cols[8]) || parseInt(cols[6]) || 0
+      };
+    }).filter(Boolean);
+    if (newData.length > 0) { 
+      setData(newData as any); 
+      setActiveTab('overview'); 
+      setImportText(''); 
+    }
+  };
+
+  return (
+    <div className={darkMode ? 'dark' : ''}>
+      <div className="min-h-screen bg-[#F8F9FA] dark:bg-[#0B0E14] text-[#202124] dark:text-[#E8EAED] pb-24 lg:pb-0 font-sans transition-colors duration-300 antialiased text-left">
+        
+        {/* Sidebar */}
+        <aside className="fixed left-0 top-0 h-full w-64 bg-white dark:bg-[#17191C] border-r border-[#DADCE0] dark:border-[#3C4043] z-30 hidden lg:block">
+          <div className="p-8 flex items-center gap-3">
+             <div className="w-10 h-10 bg-[#4285F4] rounded-lg flex items-center justify-center text-white shadow-lg font-bold text-lg">E</div>
+             <div>
+               <h1 className="text-sm font-bold tracking-tight text-left">EduDashboard</h1>
+               <p className="text-[10px] text-[#5F6368] font-bold uppercase tracking-wider text-left">Admin Console</p>
+             </div>
+          </div>
+          <nav className="px-3 space-y-1 mt-4">
+            {[
+              { id: 'overview', label: 'Báo cáo sĩ số', icon: LayoutDashboard },
+              { id: 'scheduler', label: 'Tư vấn ghi danh', icon: UserPlus },
+              { id: 'import', label: 'Đồng bộ dữ liệu', icon: RefreshCw },
+            ].map((item) => (
+              <button 
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`flex items-center gap-3 px-4 py-3 rounded-full transition-all w-full font-bold text-sm text-left
+                  ${activeTab === item.id 
+                    ? 'bg-[#E8F0FE] text-[#1967D2] dark:bg-[#4285F4]/20 dark:text-[#8AB4F8]' 
+                    : 'text-[#5F6368] dark:text-[#9AA0A6] hover:bg-[#F1F3F4] dark:hover:bg-[#303134]'}`}
+              >
+                <item.icon size={18} />
+                {item.label}
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        <main className="lg:pl-64 min-h-screen">
+          <div className="p-4 lg:p-10 max-w-7xl mx-auto">
+            
+            {/* Header */}
+            <header className="flex flex-wrap justify-between items-center mb-8 gap-4 px-2 text-left">
+              <div className="text-left">
+                <h2 className="text-xl font-bold tracking-tight text-[#202124] dark:text-white uppercase leading-none mb-1">Quản lý đào tạo</h2>
+                <div className="flex items-center gap-2">
+                   <div className="w-2 h-2 rounded-full bg-[#34A853] animate-pulse"></div>
+                   <p className="text-[#5F6368] dark:text-[#9AA0A6] text-[10px] font-bold uppercase tracking-widest text-left">Dữ liệu Live Cloud</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setDarkMode(!darkMode)}
+                  className="p-3 bg-white dark:bg-[#202124] text-[#5F6368] dark:text-[#9AA0A6] rounded-full border border-[#DADCE0] dark:border-[#3C4043] shadow-sm hover:bg-[#F1F3F4] transition-all"
+                >
+                  {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+                </button>
+                {sheetUrl && (
+                  <button onClick={fetchLiveSheet} disabled={isLoading} className="flex items-center gap-2 px-6 py-2.5 bg-[#4285F4] text-white rounded-full font-bold text-xs uppercase tracking-widest shadow-md hover:bg-[#1967D2] transition-all">
+                    <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
+                    <span>Refresh</span>
+                  </button>
+                )}
+              </div>
+            </header>
+
+            {activeTab === 'overview' && (
+              <div className="space-y-8 animate-in fade-in duration-500 text-left">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-[#4285F4] p-6 rounded-[1.5rem] text-white shadow-xl shadow-[#4285F4]/20 relative overflow-hidden text-left">
+                    <div className="absolute right-[-10px] top-[-10px] opacity-10"><Users size={120} /></div>
+                    <p className="text-[10px] font-bold text-blue-100 uppercase mb-2 tracking-widest">Tổng số học sinh</p>
+                    <div className="flex items-baseline gap-3">
+                      <p className="text-4xl font-black tracking-tighter leading-none">{stats.totalStudents}</p>
+                      <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-white/20`}>
+                        {stats.totalTrend >= 0 ? '+' : ''}{stats.totalTrend}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#34A853] p-6 rounded-[1.5rem] text-white shadow-xl shadow-[#34A853]/20 relative overflow-hidden text-left">
+                    <h3 className="text-[10px] font-bold uppercase text-green-100 mb-4 tracking-widest flex items-center gap-2">Tăng trưởng Top 3</h3>
+                    <div className="space-y-2 text-left">
+                      {stats.risingStars.map(s => (
+                        <div key={s.id} className="flex justify-between items-center bg-white/10 p-2 rounded-lg border border-white/10">
+                           <span className="text-xs font-bold truncate pr-4">{s.teacher}</span>
+                           <span className="text-xs font-black">+{s.diff}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="bg-[#EA4335] p-6 rounded-[1.5rem] text-white shadow-xl shadow-[#EA4335]/20 relative overflow-hidden text-left">
+                    <h3 className="text-[10px] font-bold uppercase text-red-100 mb-4 tracking-widest flex items-center gap-2">Lớp cần rà soát</h3>
+                    <div className="space-y-2 text-left">
+                      {stats.needsAttention.map(s => (
+                        <div key={s.id} className="flex justify-between items-center bg-white/10 p-2 rounded-lg border border-white/10">
+                           <span className="text-xs font-bold truncate pr-4">{s.teacher}</span>
+                           <span className="text-xs font-black">{s.diff}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col md:flex-row gap-4 px-2 text-left">
+                  <div className="relative flex-1 group text-left">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[#5F6368] group-focus-within:text-[#4285F4] transition-colors" size={20} />
+                    <input 
+                      type="text" 
+                      placeholder="Tìm kiếm môn học, thầy cô..." 
+                      className="w-full pl-12 pr-6 py-4 bg-white dark:bg-[#17191C] border border-[#DADCE0] dark:border-[#3C4043] rounded-2xl text-sm font-bold shadow-sm focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all dark:text-white"
+                      value={ovSearch} 
+                      onChange={(e) => setOvSearch(e.target.value)} 
+                    />
+                  </div>
+                  <select 
+                    className="bg-white dark:bg-[#17191C] px-8 py-4 rounded-2xl border border-[#DADCE0] dark:border-[#3C4043] text-[11px] font-bold uppercase tracking-widest text-[#5F6368] dark:text-[#9AA0A6] shadow-sm outline-none cursor-pointer"
+                    value={ovBranch} 
+                    onChange={e => setOvBranch(e.target.value)}
+                  >
+                    {branches.map(b => <option key={b} value={b}>{b === 'All' ? 'Tất cả chi nhánh' : b}</option>)}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 text-left">
+                  {filteredOverviewData.map((item) => {
+                    const diff = item.current - item.lastCurrent;
+                    const bStyle = branchStyles[item.branch as keyof typeof branchStyles] || branchStyles["Default"];
+                    const tIdentity = getTeacherIdentity(item.teacher);
+                    
+                    return (
+                      <div key={item.id} className="bg-white dark:bg-[#17191C] rounded-[1.5rem] border border-[#DADCE0] dark:border-[#3C4043] p-6 shadow-sm hover:shadow-xl transition-all flex flex-col group text-left relative overflow-hidden">
+                        <div className={`absolute top-0 left-0 w-full h-1.5 ${bStyle.split(' ')[0]}`}></div>
+                        
+                        <div className="flex justify-between items-start mb-6 pt-2 text-left">
+                          <div className="grow min-w-0 pr-4 text-left">
+                            <h2 className="text-base font-bold text-[#202124] dark:text-white uppercase leading-tight mb-3 text-left tracking-tight">
+                              {getCleanClassName(item)}
+                            </h2>
+                            <div className={`inline-flex items-center px-3 py-1 rounded-full ${tIdentity.bg} ${tIdentity.border} border text-left`}>
+                               <span className={`text-[11px] font-bold ${tIdentity.text}`}>{item.teacher}</span>
+                            </div>
+                          </div>
+                          <div className={`px-2.5 py-1 rounded-md font-bold text-[9px] uppercase tracking-widest shrink-0 shadow-sm ${bStyle}`}>
+                             {item.branch}
+                          </div>
+                        </div>
+
+                        <div className="bg-[#F8F9FA] dark:bg-[#202124]/50 rounded-xl p-4 mb-5 text-left border border-[#F1F3F4] dark:border-[#3C4043]">
+                          <div className="flex items-center gap-2 text-[#5F6368] dark:text-[#9AA0A6] font-bold text-[10px] mb-4 uppercase tracking-tight text-left text-left">
+                            <Clock size={14} className="text-[#4285F4]" />
+                            <span>{item.day}</span>
+                          </div>
+                          <div className="flex items-end justify-between border-t border-[#DADCE0] dark:border-[#3C4043] pt-4 text-left">
+                            <div className="text-left">
+                              <p className="text-[9px] font-bold text-[#5F6368] dark:text-[#9AA0A6] uppercase tracking-widest mb-1 text-left text-left text-left text-left">Sĩ số lớp</p>
+                              <div className="flex items-baseline gap-1">
+                                <span className="text-3xl font-bold text-[#4285F4] dark:text-[#8AB4F8] leading-none tracking-tighter">{item.current}</span>
+                                <span className="text-[10px] font-bold text-[#9AA0A6] uppercase">HS</span>
+                              </div>
+                            </div>
+                            <div className="flex flex-col items-end text-right">
+                              <div className={`flex items-center gap-1.5 font-bold text-[11px] ${diff >= 0 ? 'text-[#34A853]' : 'text-[#EA4335]'}`}>
+                                {diff > 0 ? <TrendingUp size={16} /> : diff < 0 ? <TrendingDown size={16} /> : <CheckCircle2 size={14}/>}
+                                <span className="uppercase tracking-tighter font-black">{diff === 0 ? 'Ổn định' : `${diff > 0 ? '+' : ''}${diff}`}</span>
+                              </div>
+                              <p className="text-[9px] text-[#9AA0A6] mt-1 font-bold uppercase tracking-tight text-right text-right text-right">Gốc: {item.lastCurrent}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-auto flex items-center justify-between text-[9px] font-bold uppercase tracking-widest pt-4 border-t border-[#F1F3F4] dark:border-[#3C4043]/50 text-left">
+                          <span className="flex items-center gap-1.5 text-[#9AA0A6]"><History size={12} /> {item.updatedAt}</span>
+                          <div className="flex items-center gap-1.5 text-[#34A853] font-bold text-right text-right text-right text-right">
+                            <div className="w-1.5 h-1.5 rounded-full bg-[#34A853] animate-pulse"></div>
+                            <span>#LIVE</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'scheduler' && (
+              <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500 text-left">
+                 {/* Enrollment Consulting Header & Toggle */}
+                 <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-6 px-2">
+                    <div className="text-left space-y-2">
+                      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#E8F0FE] text-[#1967D2] dark:bg-[#4285F4]/20 dark:text-[#8AB4F8] text-[10px] font-bold uppercase tracking-widest">
+                        <Info size={14} />
+                        <span>Chức năng tư vấn ghi danh</span>
+                      </div>
+                      <h2 className="text-2xl lg:text-3xl font-bold text-[#202124] dark:text-white uppercase tracking-tight">Tìm lớp phù hợp</h2>
+                      <p className="text-[#5F6368] dark:text-[#9AA0A6] text-xs font-medium max-w-lg">
+                        Tra cứu lịch học, sĩ số hiện tại và cơ sở để tư vấn chính xác nhất cho phụ huynh và học sinh.
+                      </p>
+                    </div>
+                    
+                    <div className="flex bg-white dark:bg-[#17191C] p-1 rounded-2xl shadow-sm border border-[#DADCE0] dark:border-[#3C4043] w-full lg:w-auto">
+                      <button onClick={() => setSchedulerMode('list')} className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-[11px] font-bold uppercase tracking-widest transition-all ${schedulerMode === 'list' ? 'bg-[#202124] text-white dark:bg-white dark:text-black shadow-lg' : 'text-[#5F6368]'}`}><List size={16} /> Danh sách</button>
+                      <button onClick={() => setSchedulerMode('calendar')} className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-[11px] font-bold uppercase tracking-widest transition-all ${schedulerMode === 'calendar' ? 'bg-[#202124] text-white dark:bg-white dark:text-black shadow-lg' : 'text-[#5F6368]'}`}><CalendarDays size={16} /> Lịch tháng</button>
+                    </div>
+                 </div>
+
+                 {/* Advanced Filters */}
+                 <div className="bg-white dark:bg-[#17191C] p-6 rounded-[2rem] shadow-sm border border-[#DADCE0] dark:border-[#3C4043] space-y-4">
+                    <div className="flex items-center gap-2 text-[#202124] dark:text-white font-bold text-xs uppercase tracking-widest mb-2">
+                       <Filter size={16} className="text-[#4285F4]" />
+                       <span>Bộ lọc tìm kiếm</span>
+                    </div>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                       <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-[#5F6368] uppercase tracking-wider ml-1">Chi nhánh</label>
+                          <select className="w-full bg-[#F8F9FA] dark:bg-[#202124] border border-[#DADCE0] dark:border-[#3C4043] rounded-xl text-[11px] font-bold uppercase px-4 py-3 outline-none focus:ring-2 focus:ring-[#4285F4]/20 transition-all" value={schBranch} onChange={e => setSchBranch(e.target.value)}>
+                             {branches.map(b => <option key={b} value={b}>{b === 'All' ? 'Tất cả cơ sở' : b}</option>)}
+                          </select>
+                       </div>
+                       <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-[#5F6368] uppercase tracking-wider ml-1">Môn học</label>
+                          <select className="w-full bg-[#F8F9FA] dark:bg-[#202124] border border-[#DADCE0] dark:border-[#3C4043] rounded-xl text-[11px] font-bold uppercase px-4 py-3 outline-none focus:ring-2 focus:ring-[#4285F4]/20 transition-all" value={schSubject} onChange={e => setSchSubject(e.target.value)}>
+                             {subjects.map(s => <option key={s} value={s}>{s === 'All' ? 'Tất cả môn' : s}</option>)}
+                          </select>
+                       </div>
+                       <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-[#5F6368] uppercase tracking-wider ml-1">Khối lớp</label>
+                          <select className="w-full bg-[#F8F9FA] dark:bg-[#202124] border border-[#DADCE0] dark:border-[#3C4043] rounded-xl text-[11px] font-bold uppercase px-4 py-3 outline-none focus:ring-2 focus:ring-[#4285F4]/20 transition-all" value={schGrade} onChange={e => setSchGrade(e.target.value)}>
+                             {grades.map(g => <option key={g} value={g}>{g === 'All' ? 'Tất cả khối' : g}</option>)}
+                          </select>
+                       </div>
+                       <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-[#5F6368] uppercase tracking-wider ml-1">Giáo viên</label>
+                          <div className="relative">
+                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9AA0A6]" size={14} />
+                             <input type="text" placeholder="Tìm tên..." className="w-full bg-[#F8F9FA] dark:bg-[#202124] border border-[#DADCE0] dark:border-[#3C4043] rounded-xl text-[11px] font-bold uppercase pl-10 pr-4 py-3 outline-none focus:ring-2 focus:ring-[#4285F4]/20 transition-all" value={schSearch} onChange={(e) => setSchSearch(e.target.value)} />
+                          </div>
+                       </div>
+                    </div>
+                 </div>
+
+                 {schedulerMode === 'list' ? (
+                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                      {filteredSchedulerData.map((match) => {
+                        const bStyle = branchStyles[match.branch as keyof typeof branchStyles] || branchStyles["Default"];
+                        const tIdentity = getTeacherIdentity(match.teacher);
+                        const capacity = 35; // Giả định sức chứa tối đa là 35
+                        const fillPercent = Math.min((match.current / capacity) * 100, 100);
+                        const isFull = match.current >= capacity;
+                        
+                        return (
+                        <div key={match.id} className="flex flex-col bg-white dark:bg-[#17191C] rounded-[2rem] shadow-sm hover:shadow-xl transition-all border border-[#DADCE0] dark:border-[#3C4043] overflow-hidden group">
+                          {/* Card Content */}
+                          <div className="p-6 lg:p-8 space-y-6">
+                             {/* Top Section: Class Name & Status */}
+                             <div className="flex justify-between items-start gap-4">
+                                <div className="space-y-1">
+                                   <h3 className="text-xl font-bold text-[#202124] dark:text-white uppercase tracking-tight group-hover:text-[#4285F4] transition-colors">
+                                      {getCleanClassName(match)}
+                                   </h3>
+                                   <div className={`inline-flex items-center px-3 py-1 rounded-full ${tIdentity.bg} ${tIdentity.border} border text-[11px] font-bold ${tIdentity.text}`}>
+                                      <span>Giáo viên: {match.teacher}</span>
+                                   </div>
+                                </div>
+                                <div className={`px-4 py-1.5 rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-sm shrink-0 ${bStyle}`}>
+                                   {match.branch}
+                                </div>
+                             </div>
+
+                             {/* Details Grid */}
+                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-[#F1F3F4] dark:border-[#3C4043]">
+                                <div className="flex items-center gap-3 text-[#5F6368] dark:text-[#9AA0A6]">
+                                   <div className="w-10 h-10 rounded-full bg-[#F8F9FA] dark:bg-[#202124] flex items-center justify-center shrink-0 border border-[#DADCE0] dark:border-[#3C4043]">
+                                      <Clock size={18} className="text-[#4285F4]" />
+                                   </div>
+                                   <div className="min-w-0">
+                                      <p className="text-[9px] font-bold uppercase tracking-widest opacity-60">Lịch học</p>
+                                      <p className="text-xs font-bold dark:text-white truncate">{match.day}</p>
+                                   </div>
+                                </div>
+                                <div className="flex items-center gap-3 text-[#5F6368] dark:text-[#9AA0A6]">
+                                   <div className="w-10 h-10 rounded-full bg-[#F8F9FA] dark:bg-[#202124] flex items-center justify-center shrink-0 border border-[#DADCE0] dark:border-[#3C4043]">
+                                      <Users size={18} className="text-[#34A853]" />
+                                   </div>
+                                   <div className="grow">
+                                      <div className="flex justify-between items-end mb-1">
+                                         <p className="text-[9px] font-bold uppercase tracking-widest opacity-60">Hiện có</p>
+                                         <p className="text-xs font-bold dark:text-white">{match.current}/{capacity}</p>
+                                      </div>
+                                      <div className="w-full h-1.5 bg-[#F1F3F4] dark:bg-slate-800 rounded-full overflow-hidden">
+                                         <div className={`h-full transition-all duration-500 ${isFull ? 'bg-[#EA4335]' : 'bg-[#34A853]'}`} style={{ width: `${fillPercent}%` }}></div>
+                                      </div>
+                                   </div>
+                                </div>
+                             </div>
+                          </div>
+
+                          {/* Footer Action */}
+                          <div className="bg-[#F8F9FA] dark:bg-[#202124]/50 px-6 py-4 flex items-center justify-between border-t border-[#DADCE0] dark:border-[#3C4043]">
+                             <div className="flex items-center gap-2">
+                                <span className={`w-2 h-2 rounded-full ${isFull ? 'bg-[#EA4335]' : 'bg-[#34A853] animate-pulse'}`}></span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-[#5F6368] dark:text-[#9AA0A6]">
+                                   {isFull ? 'Lớp đã đầy' : 'Đang nhận học sinh'}
+                                </span>
+                             </div>
+                             <button className="flex items-center gap-2 bg-[#202124] dark:bg-white text-white dark:text-[#202124] px-5 py-2 rounded-xl text-[11px] font-bold uppercase tracking-widest hover:bg-[#4285F4] hover:text-white transition-all active:scale-95 shadow-md">
+                                <span>Chọn lớp</span>
+                                <ArrowRight size={16} />
+                             </button>
+                          </div>
+                        </div>
+                      )})}
+                   </div>
+                 ) : (
+                   <CalendarMonthView data={data} filterGrade={schGrade} filterSubject={schSubject} filterBranch={schBranch} getCleanClassName={getCleanClassName} />
+                 )}
+              </div>
+            )}
+
+            {activeTab === 'import' && (
+              <div className="max-w-2xl mx-auto py-4 space-y-10 animate-in fade-in duration-500 text-left">
+                 <div className="bg-white dark:bg-[#17191C] p-10 rounded-[2rem] shadow-sm border border-[#DADCE0] dark:border-[#3C4043] text-left">
+                    <div className="w-14 h-14 bg-[#34A853] text-white rounded-2xl flex items-center justify-center mb-8 shadow-lg shadow-[#34A853]/20"><RefreshCw size={24} /></div>
+                    <h2 className="text-xl font-bold uppercase tracking-tight mb-2 text-left">Đồng bộ Cloud Sheet</h2>
+                    <p className="text-[#5F6368] text-[10px] font-bold uppercase tracking-widest mb-10 italic text-left">Cập nhật tự động từ Google Sheets (CSV)</p>
+                    
+                    <div className="space-y-4 text-left">
+                      <input 
+                        type="text" 
+                        placeholder="DÁN LINK GOOGLE SHEET (CSV) TẠI ĐÂY..." 
+                        className="w-full px-6 py-4 bg-[#F8F9FA] dark:bg-[#202124] border border-[#DADCE0] dark:border-[#3C4043] rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-[#34A853]/20 transition-all dark:text-white shadow-inner placeholder:text-[#9AA0A6]"
+                        value={sheetUrl}
+                        onChange={(e) => setSheetUrl(e.target.value)}
+                      />
+                      <div className="grid grid-cols-2 gap-3 text-left">
+                        <button 
+                          onClick={saveSheetLink} 
+                          disabled={isSaving || !sheetUrl}
+                          className="flex items-center justify-center gap-2 bg-[#F1F3F4] dark:bg-[#303134] text-[#202124] dark:text-white font-bold py-4 rounded-2xl transition-all uppercase tracking-widest text-xs hover:bg-[#DADCE0] dark:hover:bg-[#3C4043]"
+                        >
+                          {isSaving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
+                          <span>Lưu liên kết</span>
+                        </button>
+                        <button 
+                          onClick={fetchLiveSheet} 
+                          disabled={isLoading || !sheetUrl} 
+                          className="bg-[#34A853] text-white font-bold py-4 rounded-2xl transition-all shadow-xl active:scale-95 uppercase tracking-widest text-xs hover:bg-[#137333]"
+                        >
+                          {isLoading ? <RefreshCw size={16} className="animate-spin" /> : <span>Bắt đầu đồng bộ</span>}
+                        </button>
+                      </div>
+                    </div>
+                 </div>
+
+                 <div className="bg-white dark:bg-[#17191C] p-10 rounded-[2rem] shadow-sm border border-[#DADCE0] dark:border-[#3C4043] text-left">
+                    <h2 className="text-[11px] font-bold text-[#5F6368] dark:text-[#9AA0A6] uppercase tracking-widest mb-6 leading-none text-left">Nhập liệu thủ công (Excel Copy)</h2>
+                    <textarea 
+                      className="w-full h-48 p-8 bg-[#F8F9FA] dark:bg-[#202124] border border-[#DADCE0] dark:border-[#3C4043] rounded-2xl font-mono text-[11px] focus:ring-1 focus:ring-[#DADCE0] outline-none mb-6 dark:text-white shadow-inner" 
+                      placeholder="Chọn vùng dữ liệu trên Excel (9 cột) rồi dán vào đây..." 
+                      value={importText} 
+                      onChange={(e) => setImportText(e.target.value)}
+                    ></textarea>
+                    <button onClick={handleManualImport} className="w-full bg-[#F1F3F4] dark:bg-[#303134] text-[#202124] dark:text-white font-bold py-4 rounded-2xl transition-all uppercase tracking-widest text-xs hover:bg-[#E8EAED]">Xử lý vùng dán</button>
+                 </div>
+              </div>
+            )}
+          </div>
+        </main>
+
+        {/* Mobile Nav */}
+        <nav className="fixed bottom-6 left-6 right-6 h-18 bg-[#202124]/95 dark:bg-[#E8EAED]/95 backdrop-blur-md flex items-center justify-around z-40 lg:hidden px-6 shadow-2xl rounded-2xl border border-white/10 dark:border-black/10 transition-all text-left">
+          <button onClick={() => setActiveTab('overview')} className={`flex flex-col items-center gap-1.5 ${activeTab === 'overview' ? 'text-[#8AB4F8] dark:text-[#1967D2] scale-110 font-bold' : 'text-[#9AA0A6] dark:text-[#5F6368]'}`}>
+            <LayoutGrid size={22} />
+            <span className="text-[8px] font-bold uppercase tracking-widest leading-none">Sĩ số</span>
+          </button>
+          <button onClick={() => setActiveTab('scheduler')} className={`flex flex-col items-center gap-1.5 ${activeTab === 'scheduler' ? 'text-[#8AB4F8] dark:text-[#1967D2] scale-110 font-bold' : 'text-[#9AA0A6] dark:text-[#5F6368]'}`}>
+            <UserPlus size={22} />
+            <span className="text-[8px] font-bold uppercase tracking-widest leading-none">Tư vấn</span>
+          </button>
+          <button onClick={() => setActiveTab('import')} className={`flex flex-col items-center gap-1.5 ${activeTab === 'import' ? 'text-[#8AB4F8] dark:text-[#1967D2] scale-110 font-bold' : 'text-[#9AA0A6] dark:text-[#5F6368]'}`}>
+            <RefreshCw size={22} />
+            <span className="text-[8px] font-bold uppercase tracking-widest leading-none">Dữ liệu</span>
+          </button>
+        </nav>
+      </div>
+    </div>
+  );
+};
+
+// --- CALENDAR VIEW COMPONENT ---
+const CalendarMonthView = ({ data, filterGrade, filterSubject, filterBranch, getCleanClassName }: any) => {
+  const daysInMonth = Array.from({ length: 31 }, (_, i) => i + 1);
+  const startOffset = 2; 
+  const isClassOnDayInternal = (dayStr: string, dayIndex: number) => {
+    const dayMap: any = { 1: ["T2", "Thứ 2"], 2: ["T3", "Thứ 3"], 3: ["T4", "Thứ 4"], 4: ["T5", "Thứ 5"], 5: ["T6", "Thứ 6"], 6: ["T7", "Thứ 7"], 0: ["CN", "Chủ Nhật"] };
+    return dayMap[dayIndex].some((keyword: any) => dayStr?.includes(keyword));
+  };
+  const dayNames = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+
+  return (
+    <div className="bg-white dark:bg-[#17191C] rounded-[2rem] border border-[#DADCE0] dark:border-[#3C4043] shadow-xl overflow-hidden animate-in fade-in transition-all text-left">
+      <div className="bg-[#F8F9FA] dark:bg-[#202124] border-b border-[#DADCE0] dark:border-[#3C4043] p-4 grid grid-cols-7 text-center">
+        {dayNames.map((d, i) => (<span key={i} className={`text-[10px] font-bold uppercase tracking-[0.2em] ${i === 0 ? 'text-[#EA4335]' : 'text-[#5F6368] dark:text-[#9AA0A6]'}`}>{d}</span>))}
+      </div>
+      <div className="grid grid-cols-7 gap-px bg-[#DADCE0] dark:bg-[#3C4043] text-left">
+        {Array(startOffset).fill(null).map((_, i) => <div key={i} className="bg-[#F1F3F4]/50 dark:bg-[#17191C]/50 h-24 sm:h-36"></div>)}
+        {daysInMonth.map(day => {
+          const dayOfWeek = (day + startOffset - 1) % 7;
+          const classesToday = data.filter((d: any) => (filterBranch === 'All' || d.branch === filterBranch) && (filterGrade === 'All' || d.grade === filterGrade) && (filterSubject === 'All' || d.subject === filterSubject) && isClassOnDayInternal(d.day, dayOfWeek));
+          return (
+            <div key={day} className="bg-white dark:bg-[#17191C] h-24 sm:h-44 p-1.5 overflow-y-auto hover:bg-[#F8F9FA] dark:hover:bg-[#202124] transition-all group relative text-left">
+               <span className={`text-[10px] font-bold ml-1 ${dayOfWeek === 0 ? 'text-[#EA4335]' : 'text-[#DADCE0] dark:text-[#3C4043] group-hover:text-[#5F6368] dark:group-hover:text-[#9AA0A6]'}`}>{day}</span>
+               <div className="mt-2 space-y-1 text-left">
+                 {classesToday.map((c: any) => (
+                    <div key={c.id} className="text-[7px] p-1.5 font-bold rounded-md border border-[#E8F0FE] dark:border-[#4285F4]/30 bg-[#E8F0FE]/50 dark:bg-[#4285F4]/10 text-[#1967D2] dark:text-[#8AB4F8] leading-tight shadow-sm truncate uppercase tracking-tighter text-left">
+                        {getCleanClassName(c)}
+                    </div>
+                 ))}
+               </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+export default App;
